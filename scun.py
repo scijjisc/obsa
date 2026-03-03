@@ -2,14 +2,19 @@ import subprocess
 import re
 import sys
 
-def run_nmap(target):
-    print(f"[+] Starte Scan auf {target} ...\n")
 
-    # -sS = TCP SYN Scan
-    # -p- = alle 65535 Ports
-    # -T4 = schneller Scan
-    # -oG - = Grepable Output auf stdout
-    command = ["nmap", "-sS", "-p-", "-T4", "-oG", "-", target]
+def run_nmap(target):
+    print(f"[+] Starte erweiterten Scan auf {target} ...\n")
+
+    command = [
+        "nmap",
+        "-sS",      # TCP SYN Scan
+        "-p-",      # alle Ports
+        "-O",       # OS Erkennung
+        "-T4",
+        "-oN", "-", # normales Output-Format
+        target
+    ]
 
     result = subprocess.run(command, capture_output=True, text=True)
     return result.stdout
@@ -17,31 +22,38 @@ def run_nmap(target):
 
 def parse_output(output):
     hosts = {}
+    current_ip = None
 
     for line in output.splitlines():
-        if "Ports:" in line:
-            ip_match = re.search(r"Host:\s(\S+)", line)
-            ports_match = re.search(r"Ports:\s(.+)", line)
 
-            if ip_match and ports_match:
-                ip = ip_match.group(1)
-                ports_data = ports_match.group(1)
+        # IP erkennen
+        if line.startswith("Nmap scan report for"):
+            current_ip = line.split()[-1]
+            hosts[current_ip] = {
+                "ports": [],
+                "os": "Unbekannt"
+            }
 
-                open_ports = []
-                for port_entry in ports_data.split(","):
-                    if "/open/" in port_entry:
-                        port = port_entry.split("/")[0]
-                        open_ports.append(port)
+        # Offene Ports erkennen
+        if "/tcp" in line and "open" in line:
+            port = line.split("/")[0].strip()
+            hosts[current_ip]["ports"].append(port)
 
-                hosts[ip] = open_ports
+        # OS erkennen
+        if "OS details:" in line:
+            os_info = line.split("OS details:")[1].strip()
+            hosts[current_ip]["os"] = os_info
+
+        if "Running:" in line and hosts[current_ip]["os"] == "Unbekannt":
+            os_info = line.split("Running:")[1].strip()
+            hosts[current_ip]["os"] = os_info
 
     return hosts
 
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python3 nmap_scan.py <target>")
-        print("Beispiel: python3 nmap_scan.py 192.168.56.101")
+        print("Usage: sudo python3 nmap_os_scan.py <target>")
         sys.exit(1)
 
     target = sys.argv[1]
@@ -51,11 +63,13 @@ def main():
     print("\n[+] Scan-Ergebnis:\n")
 
     if not hosts:
-        print("Keine offenen Ports gefunden.")
+        print("Keine Hosts gefunden.")
     else:
-        for ip, ports in hosts.items():
+        for ip, data in hosts.items():
             print(f"Host: {ip}")
-            print(f"Offene Ports: {', '.join(ports)}\n")
+            print(f"OS: {data['os']}")
+            print(f"Offene Ports: {', '.join(data['ports']) if data['ports'] else 'Keine'}")
+            print("-" * 40)
 
 
 if __name__ == "__main__":
